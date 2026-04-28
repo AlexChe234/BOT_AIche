@@ -8,10 +8,26 @@ import logging
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command, CommandStart
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, BotCommand
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 
 from config import config, logger, error_logger
 from context_manager import context_manager
 from api_client import api_client, AIResponse
+
+
+# =============================================================================
+# Состояния (FSM)
+# =============================================================================
+
+class MenuState(StatesGroup):
+    MAIN = State()          # Главное меню
+    SETTINGS = State()      # Настройки
+    TEMPERATURE = State()   # Выбор температуры
+    MODEL_PROVIDER = State() # Выбор провайдера
+    MODEL_OPENAI = State()  # Модели OpenAI
+    MODEL_ANTHROPIC = State() # Модели Anthropic
+    MODEL_GOOGLE = State()  # Модели Google
 
 # =============================================================================
 # Инициализация бота
@@ -71,16 +87,26 @@ def get_settings_keyboard() -> ReplyKeyboardMarkup:
 
 
 def get_temperature_keyboard() -> ReplyKeyboardMarkup:
-    """Создать клавиатуру выбора температуры."""
+    """Создать клавиатуру выбора температуры (0.0 - 1.0 с шагом 0.1)."""
     keyboard = ReplyKeyboardMarkup(
         keyboard=[
             [
                 KeyboardButton(text="0.0"),
+                KeyboardButton(text="0.1"),
+                KeyboardButton(text="0.2")
+            ],
+            [
                 KeyboardButton(text="0.3"),
+                KeyboardButton(text="0.4"),
                 KeyboardButton(text="0.5")
             ],
             [
+                KeyboardButton(text="0.6"),
                 KeyboardButton(text="0.7"),
+                KeyboardButton(text="0.8")
+            ],
+            [
+                KeyboardButton(text="0.9"),
                 KeyboardButton(text="1.0")
             ],
             [
@@ -175,7 +201,7 @@ def format_response(response: AIResponse, show_thinking: bool = False) -> str:
 # =============================================================================
 
 @dp.message(CommandStart())
-async def cmd_start(message: Message) -> None:
+async def cmd_start(message: Message, state: FSMContext) -> None:
     """Обработчик команды /start."""
     user_id = message.from_user.id
     username = message.from_user.username or message.from_user.first_name
@@ -184,6 +210,9 @@ async def cmd_start(message: Message) -> None:
     
     # Получаем или создаём контекст
     context_manager.get_context(user_id)
+    
+    # Сбрасываем состояние в главное меню
+    await state.set_state(MenuState.MAIN)
     
     await message.answer(
         f"👋 Привет, {username}!\n\n"
@@ -198,13 +227,15 @@ async def cmd_start(message: Message) -> None:
 
 
 @dp.message(Command("reset"))
-async def cmd_reset(message: Message) -> None:
+async def cmd_reset(message: Message, state: FSMContext) -> None:
     """Обработчик команды /reset — очистка контекста."""
     user_id = message.from_user.id
     username = message.from_user.username or message.from_user.first_name
     
     context_manager.clear_context(user_id)
     logger.info(f"Пользователь {username} ({user_id}) очистил контекст")
+    
+    await state.set_state(MenuState.MAIN)
     
     await message.answer(
         "🧹 Контекст очищен!\n\n"
@@ -214,11 +245,13 @@ async def cmd_reset(message: Message) -> None:
 
 
 @dp.message(Command("stats"))
-async def cmd_stats(message: Message) -> None:
+async def cmd_stats(message: Message, state: FSMContext) -> None:
     """Обработчик команды /stats — статистика."""
     user_id = message.from_user.id
     context = context_manager.get_context(user_id)
     stats = context_manager.get_stats()
+    
+    await state.set_state(MenuState.MAIN)
     
     await message.answer(
         f"📊 Статистика\n\n"
@@ -232,8 +265,10 @@ async def cmd_stats(message: Message) -> None:
 
 
 @dp.message(Command("help"))
-async def cmd_help(message: Message) -> None:
+async def cmd_help(message: Message, state: FSMContext) -> None:
     """Обработчик команды /help — справка."""
+    await state.set_state(MenuState.MAIN)
+    
     await message.answer(
         "📖 Справка\n\n"
         "Я AI-ассистент, работающий через ProxyApi.ru.\n\n"
@@ -257,34 +292,40 @@ async def cmd_help(message: Message) -> None:
 # =============================================================================
 
 @dp.message(lambda msg: msg.text == "🚀 Начать диалог")
-async def btn_start(message: Message) -> None:
+async def btn_start(message: Message, state: FSMContext) -> None:
     """Обработчик кнопки 'Начать диалог'."""
-    await cmd_start(message)
+    await state.set_state(MenuState.MAIN)
+    await cmd_start(message, state)
 
 
 @dp.message(lambda msg: msg.text == "🧹 Очистить историю")
-async def btn_reset(message: Message) -> None:
+async def btn_reset(message: Message, state: FSMContext) -> None:
     """Обработчик кнопки 'Очистить историю'."""
-    await cmd_reset(message)
+    await state.set_state(MenuState.MAIN)
+    await cmd_reset(message, state)
 
 
 @dp.message(lambda msg: msg.text == "📊 Статистика")
-async def btn_stats(message: Message) -> None:
+async def btn_stats(message: Message, state: FSMContext) -> None:
     """Обработчик кнопки 'Статистика'."""
-    await cmd_stats(message)
+    await state.set_state(MenuState.MAIN)
+    await cmd_stats(message, state)
 
 
 @dp.message(lambda msg: msg.text == "❓ Справка")
-async def btn_help(message: Message) -> None:
+async def btn_help(message: Message, state: FSMContext) -> None:
     """Обработчик кнопки 'Справка'."""
-    await cmd_help(message)
+    await state.set_state(MenuState.MAIN)
+    await cmd_help(message, state)
 
 
 @dp.message(lambda msg: msg.text == "⚙️ Настройки")
-async def btn_settings(message: Message) -> None:
+async def btn_settings(message: Message, state: FSMContext) -> None:
     """Обработчик кнопки 'Настройки'."""
     user_id = message.from_user.id
     context = context_manager.get_context(user_id)
+    
+    await state.set_state(MenuState.SETTINGS)
     
     await message.answer(
         f"⚙️ Настройки\n\n"
@@ -296,10 +337,12 @@ async def btn_settings(message: Message) -> None:
 
 
 @dp.message(lambda msg: msg.text == "🌡️ Температура")
-async def btn_temperature(message: Message) -> None:
+async def btn_temperature(message: Message, state: FSMContext) -> None:
     """Обработчик кнопки 'Температура'."""
     user_id = message.from_user.id
     context = context_manager.get_context(user_id)
+    
+    await state.set_state(MenuState.TEMPERATURE)
     
     await message.answer(
         f"🌡️ Выбор температуры\n\n"
@@ -314,8 +357,10 @@ async def btn_temperature(message: Message) -> None:
 
 
 @dp.message(lambda msg: msg.text == "🤖 Выбрать модель")
-async def btn_select_model(message: Message) -> None:
+async def btn_select_model(message: Message, state: FSMContext) -> None:
     """Обработчик кнопки 'Выбрать модель'."""
+    await state.set_state(MenuState.MODEL_PROVIDER)
+    
     await message.answer(
         "🤖 Выбор провайдера\n\n"
         "Выберите провайдера моделей:",
@@ -324,8 +369,10 @@ async def btn_select_model(message: Message) -> None:
 
 
 @dp.message(lambda msg: msg.text == "🟦 OpenAI")
-async def btn_openai_models(message: Message) -> None:
+async def btn_openai_models(message: Message, state: FSMContext) -> None:
     """Обработчик кнопки 'OpenAI'."""
+    await state.set_state(MenuState.MODEL_OPENAI)
+    
     await message.answer(
         "🟦 Модели OpenAI\n\n"
         "Выберите модель:",
@@ -334,8 +381,10 @@ async def btn_openai_models(message: Message) -> None:
 
 
 @dp.message(lambda msg: msg.text == "🟪 Anthropic")
-async def btn_anthropic_models(message: Message) -> None:
+async def btn_anthropic_models(message: Message, state: FSMContext) -> None:
     """Обработчик кнопки 'Anthropic'."""
+    await state.set_state(MenuState.MODEL_ANTHROPIC)
+    
     await message.answer(
         "🟪 Модели Anthropic\n\n"
         "Выберите модель:",
@@ -344,8 +393,10 @@ async def btn_anthropic_models(message: Message) -> None:
 
 
 @dp.message(lambda msg: msg.text == "🟥 Google")
-async def btn_google_models(message: Message) -> None:
+async def btn_google_models(message: Message, state: FSMContext) -> None:
     """Обработчик кнопки 'Google'."""
+    await state.set_state(MenuState.MODEL_GOOGLE)
+    
     await message.answer(
         "🟥 Модели Google\n\n"
         "Выберите модель:",
@@ -354,25 +405,62 @@ async def btn_google_models(message: Message) -> None:
 
 
 @dp.message(lambda msg: msg.text == "🔙 Назад")
-async def btn_back(message: Message) -> None:
+async def btn_back(message: Message, state: FSMContext) -> None:
     """Обработчик кнопки 'Назад'."""
-    await message.answer(
-        "⚙️ Настройки\n\n"
-        "Выберите параметр для изменения:",
-        reply_markup=get_settings_keyboard()
-    )
-
+    current_state = await state.get_state()
+    user_id = message.from_user.id
+    context = context_manager.get_context(user_id)
+    
+    # Навигация по уровням
+    if current_state == MenuState.SETTINGS:
+        # Из настроек → в главное меню
+        await state.set_state(MenuState.MAIN)
+        await message.answer(
+            "🔙 Главное меню",
+            reply_markup=get_main_keyboard()
+        )
+    elif current_state in [MenuState.TEMPERATURE, MenuState.MODEL_PROVIDER]:
+        # Из температуры или выбора провайдера → в настройки
+        await state.set_state(MenuState.SETTINGS)
+        await message.answer(
+            f"⚙️ Настройки\n\n"
+            f"Текущая модель: {context.model}\n"
+            f"Текущая температура: {context.temperature}\n\n"
+            f"Выберите параметр для изменения:",
+            reply_markup=get_settings_keyboard()
+        )
+    elif current_state in [MenuState.MODEL_OPENAI, MenuState.MODEL_ANTHROPIC, MenuState.MODEL_GOOGLE]:
+        # Из выбора модели → к выбору провайдера
+        await state.set_state(MenuState.MODEL_PROVIDER)
+        await message.answer(
+            "🤖 Выбор провайдера\n\n"
+            "Выберите провайдера моделей:",
+            reply_markup=get_model_providers_keyboard()
+        )
+    else:
+        # По умолчанию → в настройки
+        await state.set_state(MenuState.SETTINGS)
+        await message.answer(
+            f"⚙️ Настройки\n\n"
+            f"Текущая модель: {context.model}\n"
+            f"Текущая температура: {context.temperature}\n\n"
+            f"Выберите параметр для изменения:",
+            reply_markup=get_settings_keyboard()
+        )
+        
 
 # Обработчики выбора температуры
-TEMP_VALUES = ["0.0", "0.3", "0.5", "0.7", "1.0"]
+TEMP_VALUES = ["0.0", "0.1", "0.2", "0.3", "0.4", "0.5", "0.6", "0.7", "0.8", "0.9", "1.0"]
 
 @dp.message(lambda msg: msg.text in TEMP_VALUES)
-async def btn_set_temperature(message: Message) -> None:
+async def btn_set_temperature(message: Message, state: FSMContext) -> None:
     """Обработчик выбора температуры."""
     user_id = message.from_user.id
     temp = float(message.text)
     context = context_manager.get_context(user_id)
     context.set_temperature(temp)
+    
+    await state.set_state(MenuState.SETTINGS)
     
     await message.answer(
         f"✅ Температура установлена: {temp}\n\n"
@@ -385,7 +473,7 @@ async def btn_set_temperature(message: Message) -> None:
 ALL_MODELS = config.OPENAI_MODELS + config.ANTHROPIC_MODELS + config.GOOGLE_MODELS
 
 @dp.message(lambda msg: msg.text in ALL_MODELS)
-async def btn_set_model(message: Message) -> None:
+async def btn_set_model(message: Message, state: FSMContext) -> None:
     """Обработчик выбора модели."""
     user_id = message.from_user.id
     model = message.text
@@ -400,11 +488,15 @@ async def btn_set_model(message: Message) -> None:
     else:
         provider = "🟥 Google"
     
+    # Возвращаем в главное меню после выбора модели
+    await state.set_state(MenuState.MAIN)
+    
     await message.answer(
         f"✅ Модель установлена: {model}\n"
-        f"Провайдер: {provider}\n\n"
-        f"Текущая температура: {context.temperature}",
-        reply_markup=get_settings_keyboard()
+        f"Провайдер: {provider}\n"
+        f"Температура: {context.temperature}\n\n"
+        f"Теперь вы можете начать диалог!",
+        reply_markup=get_main_keyboard()
     )
 
 
@@ -412,14 +504,21 @@ async def btn_set_model(message: Message) -> None:
 # Обработчик сообщений
 # =============================================================================
 
-@dp.message()
-async def handle_message(message: Message) -> None:
+@dp.message(lambda msg: msg.text and not msg.text.startswith("/"))
+async def handle_message(message: Message, state: FSMContext) -> None:
     """Обработчик обычных сообщений."""
     user_id = message.from_user.id
     username = message.from_user.username or message.from_user.first_name
     user_text = message.text
     
     if not user_text:
+        return
+    
+    # Проверяем текущее состояние
+    current_state = await state.get_state()
+    
+    # Если пользователь в меню настроек - игнорируем текстовые сообщения
+    if current_state != MenuState.MAIN:
         return
     
     # Игнорируем сообщения, которые являются текстом кнопок

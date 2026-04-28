@@ -79,8 +79,8 @@ class Config:
     
     # Модели по провайдерам
     OPENAI_MODELS = ["gpt-5", "gpt-4.1", "o4-mini"]
-    ANTHROPIC_MODELS = ["claude-sonnet-4-5", "claude-3-5-haiku-20241022", "claude-opus-4-7"]
-    GOOGLE_MODELS = ["gemini-2.5-flash-image", "gemini-2.5-pro", "veo-3.0-generate-001"]
+    ANTHROPIC_MODELS = ["claude-sonnet-4-5", "claude-haiku-4-5", "claude-opus-4-1"]
+    GOOGLE_MODELS = ["gemini-2.5-flash", "gemini-2.5-pro", "veo-3.1-generate-preview"]
     
     @classmethod
     def validate(cls) -> bool:

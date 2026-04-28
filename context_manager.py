@@ -88,11 +88,11 @@ class DialogContext:
 
     def get_messages(self) -> list[dict]:
         """Получить сообщения в формате для API."""
-        return [asdict(msg) for msg in self.messages]
+        return [{"role": msg.role, "content": msg.content} for msg in self.messages]
 
     def get_messages_without_system(self) -> list[dict]:
         """Получить сообщения без системного промпта."""
-        return [asdict(msg) for msg in self.messages if msg.role != "system"]
+        return [{"role": msg.role, "content": msg.content} for msg in self.messages if msg.role != "system"]
 
     @property
     def message_count(self) -> int:
