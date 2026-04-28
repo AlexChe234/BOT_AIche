@@ -9,10 +9,20 @@ from typing import Optional
 from dataclasses import dataclass
 
 import httpx
+import time
 from openai import OpenAI, APIError, APIConnectionError, APITimeoutError, RateLimitError
 from anthropic import Anthropic, APIError as AnthropicAPIError
+from anthropic.types import TextBlock, Message, Usage
 
 from config import config
+
+# Google GenAI (для Google моделей)
+try:
+    from google import genai
+    from google.genai import types
+    GOOGLE_GENAI_AVAILABLE = True
+except ImportError:
+    GOOGLE_GENAI_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 error_logger = logging.getLogger("bot.errors")
@@ -38,14 +48,13 @@ class ProxyAPIClient:
         self.max_retries = config.MAX_RETRIES
         self.retry_delay = config.RETRY_DELAY
         
-        # Определяем тип клиента по модели
-        self._is_anthropic = self.model.startswith("claude")
-        
         self._init_client()
     
     def _init_client(self):
         """Инициализировать клиент на основе текущей модели."""
+        # Определяем тип модели
         self._is_anthropic = self.model.startswith("claude")
+        self._is_google = self.model.startswith(("gemini-", "veo-"))
         
         if self._is_anthropic:
             self.client = Anthropic(
@@ -54,6 +63,24 @@ class ProxyAPIClient:
                 timeout=httpx.Timeout(self.timeout)
             )
             logger.info(f"Инициализирован Anthropic клиент: {self.model}")
+        elif self._is_google:
+            # Google модели через официальное SDK
+            if not GOOGLE_GENAI_AVAILABLE:
+                raise ImportError(
+                    "Google GenAI SDK не установлен. Установите: pip install google-genai"
+                )
+            # Для Gemini используем v1beta, для Veo - базовый URL
+            if self.model.startswith("veo"):
+                self.client = genai.Client(
+                    api_key=self.api_key,
+                    http_options={"base_url": "https://api.proxyapi.ru/google"}
+                )
+            else:
+                self.client = genai.Client(
+                    api_key=self.api_key,
+                    http_options={"api_version": "v1beta", "base_url": "https://api.proxyapi.ru/google"}
+                )
+            logger.info(f"Инициализирован Google клиент: {self.model}")
         else:
             self.client = OpenAI(
                 api_key=self.api_key,
@@ -91,6 +118,8 @@ class ProxyAPIClient:
             try:
                 if self._is_anthropic:
                     response = self._send_anthropic(messages, temperature)
+                elif self._is_google:
+                    response = self._send_google(messages, temperature)
                 else:
                     response = self._send_openai(messages, temperature)
                 
@@ -142,7 +171,7 @@ class ProxyAPIClient:
             messages=messages,
             temperature=temperature
         )
-
+        
         content = response.choices[0].message.content
         input_tokens = response.usage.prompt_tokens if response.usage else None
         output_tokens = response.usage.completion_tokens if response.usage else None
@@ -152,6 +181,125 @@ class ProxyAPIClient:
             input_tokens=input_tokens,
             output_tokens=output_tokens
         )
+
+    def _send_google(self, messages: list[dict], temperature: float = 0.7) -> AIResponse:
+        """Отправить запрос к Google Gemini/Veo API."""
+        # Разделяем системное сообщение и остальные
+        system_prompt = None
+        chat_messages = []
+        
+        for msg in messages:
+            if msg["role"] == "system":
+                system_prompt = msg["content"]
+            else:
+                chat_messages.append(msg)
+
+        # Формируем содержимое запроса
+        # Google не поддерживает role system, добавляем к первому сообщению
+        if system_prompt and chat_messages:
+            if chat_messages[0]["role"] == "user":
+                contents = f"{system_prompt}\n\n{chat_messages[0]['content']}"
+            else:
+                contents = chat_messages[0]["content"]
+        elif chat_messages:
+            contents = chat_messages[-1]["content"]  # Последнее сообщение
+        else:
+            contents = "Привет!"
+        
+        # Проверяем, это модель для генерации видео (veo)
+        if self.model.startswith("veo"):
+            return self._send_google_video(contents)
+        else:
+            return self._send_google_text(contents, temperature)
+    
+    def _send_google_text(self, contents: str, temperature: float = 0.7) -> AIResponse:
+        """Отправить запрос к текстовой модели Google (Gemini)."""
+        try:
+            response = self.client.models.generate_content(
+                model=self.model,
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    temperature=temperature
+                )
+            )
+            
+            # Извлекаем текст ответа
+            content = ""
+            if hasattr(response, 'text'):
+                content = response.text
+            elif hasattr(response, 'candidates') and response.candidates:
+                candidate = response.candidates[0]
+                if hasattr(candidate, 'content') and hasattr(candidate.content, 'parts'):
+                    content = " ".join([part.text for part in candidate.content.parts if hasattr(part, 'text')])
+            
+            # Получаем информацию о токенах
+            input_tokens = None
+            output_tokens = None
+            if hasattr(response, 'usage_metadata'):
+                input_tokens = getattr(response.usage_metadata, 'prompt_token_count', None)
+                output_tokens = getattr(response.usage_metadata, 'candidates_token_count', None)
+            
+            return AIResponse(
+                content=content,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens
+            )
+        except Exception as e:
+            error_logger.error(f"Ошибка Google API: {e}")
+            raise
+        
+    def _send_google_video(self, prompt: str) -> AIResponse:
+        """Отправить запрос к модели генерации видео (Veo)."""
+        try:
+            # Запускаем генерацию видео
+            operation = self.client.models.generate_videos(
+                model=self.model,
+                prompt=prompt,
+            )
+        
+            # Ожидаем завершения генерации
+            max_wait_time = 600  # Максимум 10 минут (видео может генерироваться долго)
+            start_time = time.time()
+            
+            while not operation.done:
+                if time.time() - start_time > max_wait_time:
+                    raise TimeoutError("Превышено время ожидания генерации видео (10 минут)")
+                
+                logger.info("Ожидание завершения генерации видео...")
+                time.sleep(10)
+                operation = self.client.operations.get(operation)
+            
+            # Получаем результат и загружаем видео
+            if hasattr(operation, 'response') and hasattr(operation.response, 'generated_videos'):
+                generated_video = operation.response.generated_videos[0]
+                
+                # Скачиваем видео во временный файл
+                import tempfile
+                import os
+                
+                temp_dir = tempfile.gettempdir()
+                video_filename = f"veo_video_{int(time.time())}.mp4"
+                video_path = os.path.join(temp_dir, video_filename)
+                
+                # Загружаем видео
+                self.client.files.download(file=generated_video.video)
+                generated_video.video.save(video_path)
+                
+                # Для Telegram бота возвращаем путь к файлу
+                return AIResponse(
+                    content=f"🎥 Видео сгенерировано!\n\nФайл сохранён: {video_path}\n\n> Примечание: Видео хранится на сервере 2 дня. Скачайте его по ссылке выше.",
+                    input_tokens=None,
+                    output_tokens=None
+                )
+            
+            return AIResponse(
+                content="🎥 Видео сгенерировано! Проверьте ответ API.",
+                input_tokens=None,
+                output_tokens=None
+            )
+        except Exception as e:
+            error_logger.error(f"Ошибка генерации видео Veo: {e}")
+            raise
 
     def _send_anthropic(self, messages: list[dict], temperature: float = 0.7) -> AIResponse:
         """Отправить запрос к Anthropic API с extended thinking."""
