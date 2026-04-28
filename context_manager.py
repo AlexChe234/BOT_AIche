@@ -32,6 +32,10 @@ class DialogContext:
         self.created_at = datetime.now()
         self.last_activity = datetime.now()
         
+        # Настройки модели и температуры
+        self.model: str = config.MODEL
+        self.temperature: float = config.DEFAULT_TEMPERATURE
+        
         # Добавляем системный промпт
         self._add_system_message()
         logger.info(f"Создан контекст для пользователя {user_id}")
@@ -94,6 +98,18 @@ class DialogContext:
     def message_count(self) -> int:
         """Количество сообщений (без системного)."""
         return len([m for m in self.messages if m.role != "system"])
+
+    def set_temperature(self, temperature: float) -> None:
+        """Установить температуру генерации."""
+        self.temperature = max(0.0, min(1.0, temperature))
+        self.last_activity = datetime.now()
+        logger.info(f"Температура для пользователя {self.user_id} установлена в {self.temperature}")
+
+    def set_model(self, model: str) -> None:
+        """Установить модель."""
+        self.model = model
+        self.last_activity = datetime.now()
+        logger.info(f"Модель для пользователя {self.user_id} установлена в {self.model}")
 
 
 class ContextManager:

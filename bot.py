@@ -1,11 +1,11 @@
 """
 Telegram-бот с AI-ассистентом на базе ProxyApi.ru.
-Поддержка контекста диалога и команды /reset.
+Поддержка контекста диалога, выбор температуры и моделей.
 """
 
 import asyncio
 import logging
-from aiogram import Bot, Dispatcher
+from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command, CommandStart
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, BotCommand
 
@@ -41,8 +41,109 @@ def get_main_keyboard() -> ReplyKeyboardMarkup:
             [
                 KeyboardButton(text="📊 Статистика"),
                 KeyboardButton(text="❓ Справка")
+            ],
+            [
+                KeyboardButton(text="⚙️ Настройки")
             ]
         ],
+        resize_keyboard=True,
+        one_time_keyboard=False
+    )
+    return keyboard
+
+
+def get_settings_keyboard() -> ReplyKeyboardMarkup:
+    """Создать клавиатуру настроек."""
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[
+            [
+                KeyboardButton(text="🌡️ Температура"),
+                KeyboardButton(text="🤖 Выбрать модель")
+            ],
+            [
+                KeyboardButton(text="🔙 Назад")
+            ]
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=False
+    )
+    return keyboard
+
+
+def get_temperature_keyboard() -> ReplyKeyboardMarkup:
+    """Создать клавиатуру выбора температуры."""
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[
+            [
+                KeyboardButton(text="0.0"),
+                KeyboardButton(text="0.3"),
+                KeyboardButton(text="0.5")
+            ],
+            [
+                KeyboardButton(text="0.7"),
+                KeyboardButton(text="1.0")
+            ],
+            [
+                KeyboardButton(text="🔙 Назад")
+            ]
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=False
+    )
+    return keyboard
+
+
+def get_model_providers_keyboard() -> ReplyKeyboardMarkup:
+    """Создать клавиатуру выбора провайдера моделей."""
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[
+            [
+                KeyboardButton(text="🟦 OpenAI"),
+                KeyboardButton(text="🟪 Anthropic")
+            ],
+            [
+                KeyboardButton(text="🟥 Google")
+            ],
+            [
+                KeyboardButton(text="🔙 Назад")
+            ]
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=False
+    )
+    return keyboard
+
+
+def get_openai_models_keyboard() -> ReplyKeyboardMarkup:
+    """Создать клавиатуру моделей OpenAI."""
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text=model)] for model in config.OPENAI_MODELS
+        ] + [[KeyboardButton(text="🔙 Назад")]],
+        resize_keyboard=True,
+        one_time_keyboard=False
+    )
+    return keyboard
+
+
+def get_anthropic_models_keyboard() -> ReplyKeyboardMarkup:
+    """Создать клавиатуру моделей Anthropic."""
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text=model)] for model in config.ANTHROPIC_MODELS
+        ] + [[KeyboardButton(text="🔙 Назад")]],
+        resize_keyboard=True,
+        one_time_keyboard=False
+    )
+    return keyboard
+
+
+def get_google_models_keyboard() -> ReplyKeyboardMarkup:
+    """Создать клавиатуру моделей Google."""
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text=model)] for model in config.GOOGLE_MODELS
+        ] + [[KeyboardButton(text="🔙 Назад")]],
         resize_keyboard=True,
         one_time_keyboard=False
     )
@@ -124,7 +225,8 @@ async def cmd_stats(message: Message) -> None:
         f"Ваши сообщения в контексте: {context.message_count}\n"
         f"Активных пользователей: {stats['active_users']}\n"
         f"Всего сообщений в памяти: {stats['total_messages']}\n"
-        f"Модель: {config.MODEL}",
+        f"Модель: {context.model}\n"
+        f"Температура: {context.temperature}",
         reply_markup=get_main_keyboard()
     )
 
@@ -143,7 +245,9 @@ async def cmd_help(message: Message) -> None:
         "Как использовать:\n"
         "Просто напишите сообщение в чат, и я отвечу.\n"
         "Я запоминаю контекст диалога, поэтому можно задавать уточняющие вопросы.\n\n"
-        f"Модель: {config.MODEL}",
+        "Настройки:\n"
+        "• Температура — креативность ответов (0.0 - 1.0)\n"
+        "• Модель — выбор AI модели (OpenAI, Anthropic, Google)",
         reply_markup=get_main_keyboard()
     )
 
@@ -176,6 +280,134 @@ async def btn_help(message: Message) -> None:
     await cmd_help(message)
 
 
+@dp.message(lambda msg: msg.text == "⚙️ Настройки")
+async def btn_settings(message: Message) -> None:
+    """Обработчик кнопки 'Настройки'."""
+    user_id = message.from_user.id
+    context = context_manager.get_context(user_id)
+    
+    await message.answer(
+        f"⚙️ Настройки\n\n"
+        f"Текущая модель: {context.model}\n"
+        f"Текущая температура: {context.temperature}\n\n"
+        f"Выберите параметр для изменения:",
+        reply_markup=get_settings_keyboard()
+    )
+
+
+@dp.message(lambda msg: msg.text == "🌡️ Температура")
+async def btn_temperature(message: Message) -> None:
+    """Обработчик кнопки 'Температура'."""
+    user_id = message.from_user.id
+    context = context_manager.get_context(user_id)
+    
+    await message.answer(
+        f"🌡️ Выбор температуры\n\n"
+        f"Текущее значение: {context.temperature}\n\n"
+        f"Температура влияет на креативность ответов:\n"
+        f"• 0.0 — максимально точные и детерминированные\n"
+        f"• 0.7 — сбалансированные (по умолчанию)\n"
+        f"• 1.0 — максимально креативные\n\n"
+        f"Выберите значение:",
+        reply_markup=get_temperature_keyboard()
+    )
+
+
+@dp.message(lambda msg: msg.text == "🤖 Выбрать модель")
+async def btn_select_model(message: Message) -> None:
+    """Обработчик кнопки 'Выбрать модель'."""
+    await message.answer(
+        "🤖 Выбор провайдера\n\n"
+        "Выберите провайдера моделей:",
+        reply_markup=get_model_providers_keyboard()
+    )
+
+
+@dp.message(lambda msg: msg.text == "🟦 OpenAI")
+async def btn_openai_models(message: Message) -> None:
+    """Обработчик кнопки 'OpenAI'."""
+    await message.answer(
+        "🟦 Модели OpenAI\n\n"
+        "Выберите модель:",
+        reply_markup=get_openai_models_keyboard()
+    )
+
+
+@dp.message(lambda msg: msg.text == "🟪 Anthropic")
+async def btn_anthropic_models(message: Message) -> None:
+    """Обработчик кнопки 'Anthropic'."""
+    await message.answer(
+        "🟪 Модели Anthropic\n\n"
+        "Выберите модель:",
+        reply_markup=get_anthropic_models_keyboard()
+    )
+
+
+@dp.message(lambda msg: msg.text == "🟥 Google")
+async def btn_google_models(message: Message) -> None:
+    """Обработчик кнопки 'Google'."""
+    await message.answer(
+        "🟥 Модели Google\n\n"
+        "Выберите модель:",
+        reply_markup=get_google_models_keyboard()
+    )
+
+
+@dp.message(lambda msg: msg.text == "🔙 Назад")
+async def btn_back(message: Message) -> None:
+    """Обработчик кнопки 'Назад'."""
+    await message.answer(
+        "⚙️ Настройки\n\n"
+        "Выберите параметр для изменения:",
+        reply_markup=get_settings_keyboard()
+    )
+
+
+# Обработчики выбора температуры
+TEMP_VALUES = ["0.0", "0.3", "0.5", "0.7", "1.0"]
+
+@dp.message(lambda msg: msg.text in TEMP_VALUES)
+async def btn_set_temperature(message: Message) -> None:
+    """Обработчик выбора температуры."""
+    user_id = message.from_user.id
+    temp = float(message.text)
+    context = context_manager.get_context(user_id)
+    context.set_temperature(temp)
+    
+    await message.answer(
+        f"✅ Температура установлена: {temp}\n\n"
+        f"Текущая модель: {context.model}",
+        reply_markup=get_settings_keyboard()
+    )
+
+
+# Обработчики выбора моделей
+ALL_MODELS = config.OPENAI_MODELS + config.ANTHROPIC_MODELS + config.GOOGLE_MODELS
+
+@dp.message(lambda msg: msg.text in ALL_MODELS)
+async def btn_set_model(message: Message) -> None:
+    """Обработчик выбора модели."""
+    user_id = message.from_user.id
+    model = message.text
+    context = context_manager.get_context(user_id)
+    context.set_model(model)
+    
+    # Определяем провайдера
+    if model in config.OPENAI_MODELS:
+        provider = "🟦 OpenAI"
+    elif model in config.ANTHROPIC_MODELS:
+        provider = "🟪 Anthropic"
+    else:
+        provider = "🟥 Google"
+    
+    await message.answer(
+        f"✅ Модель установлена: {model}\n"
+        f"Провайдер: {provider}\n\n"
+        f"Текущая температура: {context.temperature}",
+        reply_markup=get_settings_keyboard()
+    )
+
+
 # =============================================================================
 # Обработчик сообщений
 # =============================================================================
@@ -191,7 +423,12 @@ async def handle_message(message: Message) -> None:
         return
     
     # Игнорируем сообщения, которые являются текстом кнопок
-    button_texts = ["🚀 Начать диалог", "🧹 Очистить историю", "📊 Статистика", "❓ Справка"]
+    button_texts = [
+        "🚀 Начать диалог", "🧹 Очистить историю", "📊 Статистика", "❓ Справка",
+        "⚙️ Настройки", "🌡️ Температура", "🤖 Выбрать модель", "🔙 Назад",
+        "🟦 OpenAI", "🟪 Anthropic", "🟥 Google",
+        *TEMP_VALUES, *ALL_MODELS
+    ]
     if user_text in button_texts:
         return
     
@@ -205,9 +442,13 @@ async def handle_message(message: Message) -> None:
     context.add_message("user", user_text)
     
     try:
-        # Отправляем запрос к API
+        # Обновляем модель в клиенте, если она изменилась
+        if api_client.model != context.model:
+            api_client.set_model(context.model)
+        
+        # Отправляем запрос к API с температурой пользователя
         messages = context.get_messages()
-        response = api_client.send_message(messages)
+        response = api_client.send_message(messages, temperature=context.temperature)
         
         # Добавляем ответ ассистента в контекст
         context.add_message("assistant", response.content)
