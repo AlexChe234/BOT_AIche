@@ -74,6 +74,14 @@ class Config:
         "Ты полезный ассистент Telegram-бота. Отвечай кратко и по делу на русском языке."
     )
     
+    # Температура генерации (0.0 - 1.0)
+    DEFAULT_TEMPERATURE: float = float(os.getenv("DEFAULT_TEMPERATURE", "0.7"))
+    
+    # Модели по провайдерам
+    OPENAI_MODELS = ["gpt-5", "gpt-4.1", "o4-mini"]
+    ANTHROPIC_MODELS = ["claude-sonnet-4-5", "claude-3-5-haiku-20241022", "claude-opus-4-7"]
+    GOOGLE_MODELS = ["gemini-2.5-flash-image", "gemini-2.5-pro", "veo-3.0-generate-001"]
+    
     @classmethod
     def validate(cls) -> bool:
         """Проверить наличие обязательных настроек."""

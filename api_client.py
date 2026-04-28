@@ -41,6 +41,12 @@ class ProxyAPIClient:
         # Определяем тип клиента по модели
         self._is_anthropic = self.model.startswith("claude")
         
+        self._init_client()
+    
+    def _init_client(self):
+        """Инициализировать клиент на основе текущей модели."""
+        self._is_anthropic = self.model.startswith("claude")
+        
         if self._is_anthropic:
             self.client = Anthropic(
                 api_key=self.api_key,
@@ -56,27 +62,37 @@ class ProxyAPIClient:
             )
             logger.info(f"Инициализирован OpenAI клиент: {self.model}")
 
-    def send_message(self, messages: list[dict]) -> AIResponse:
+    def set_model(self, model: str) -> None:
+        """Установить новую модель и пересоздать клиент."""
+        if self.model != model:
+            self.model = model
+            self._init_client()
+
+    def send_message(self, messages: list[dict], temperature: float = None) -> AIResponse:
         """
         Отправить сообщения и получить ответ.
         
         Args:
             messages: Список сообщений в формате [{"role": "...", "content": "..."}]
+            temperature: Температура генерации (0.0 - 1.0)
         
         Returns:
             AIResponse с ответом модели
         """
+        if temperature is None:
+            temperature = 0.7
+            
         # Логируем отправляемые параметры (без чувствительных данных)
-        logger.info(f"Отправка запроса к {self.model}")
+        logger.info(f"Отправка запроса к {self.model} (temperature={temperature})")
         logger.debug(f"Количество сообщений: {len(messages)}")
         logger.debug(f"Сообщения: {self._safe_log_messages(messages)}")
 
         for attempt in range(self.max_retries):
             try:
                 if self._is_anthropic:
-                    response = self._send_anthropic(messages)
+                    response = self._send_anthropic(messages, temperature)
                 else:
-                    response = self._send_openai(messages)
+                    response = self._send_openai(messages, temperature)
                 
                 logger.info(
                     f"Ответ получен: {response.input_tokens}in / {response.output_tokens}out токенов"
@@ -119,11 +135,12 @@ class ProxyAPIClient:
 
         raise RuntimeError("Превышено количество попыток запроса")
 
-    def _send_openai(self, messages: list[dict]) -> AIResponse:
+    def _send_openai(self, messages: list[dict], temperature: float = 0.7) -> AIResponse:
         """Отправить запрос к OpenAI-совместимому API."""
         response = self.client.chat.completions.create(
             model=self.model,
-            messages=messages
+            messages=messages,
+            temperature=temperature
         )
 
         content = response.choices[0].message.content
@@ -136,7 +153,7 @@ class ProxyAPIClient:
             output_tokens=output_tokens
         )
 
-    def _send_anthropic(self, messages: list[dict]) -> AIResponse:
+    def _send_anthropic(self, messages: list[dict], temperature: float = 0.7) -> AIResponse:
         """Отправить запрос к Anthropic API с extended thinking."""
         # Разделяем системное сообщение и остальные
         system_prompt = None
@@ -155,7 +172,8 @@ class ProxyAPIClient:
                 "type": "enabled",
                 "budget_tokens": 4096
             },
-            "messages": chat_messages
+            "messages": chat_messages,
+            "temperature": temperature
         }
 
         if system_prompt:
